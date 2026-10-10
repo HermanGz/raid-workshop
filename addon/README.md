@@ -24,8 +24,8 @@ Data lives in `addons/RaidWorkshop/MO/` (`calibration.txt`, `settings.txt`). An 
 ## MO Chess
 
 - The board is off when you arrive. Stand in the **gold circle** for 5 s to turn it on (again to turn it off).
-- Go to one of the 10 gold **start squares** (a4-a8, b4-b8). Your square gets a green border.
-- Pull the boss: everyone gets a random piece (the Claim holder the Pawn), first move after 1.5 s, then every 10 s. No hints during a move; at the end the board shows which squares were legal.
+- Go to one of the 10 gold **start squares** (a4-a8, b4-b8). The square you stand on shimmers gold.
+- Pull the boss: everyone gets a random piece (the Claim holder the Pawn), first move after 1.5 s, then every 10 s. No hints during a move. At the check, every player's square shows a green ring (good) or a red X (bad) for 1 s. Two players on the same square both fail.
 - Not on a start square at the first move = fail. Fail = red flash, then `/gg` if switched on.
 - Out of combat for 4 s (wipe, kill, reset) = reset: pieces removed, start squares flash, everyone goes back before the next pull.
 - Test without a fight: panel -> **Start test fight**. Debug window -> **Test board here** puts the board under you in any map.
