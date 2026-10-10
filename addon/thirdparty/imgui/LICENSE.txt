@@ -1,0 +1,1 @@
+Dear ImGui 1.80 (as shipped with Nexus) - MIT License, Copyright (c) 2014-2021 Omar Cornut. https://github.com/ocornut/imgui
