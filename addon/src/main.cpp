@@ -1350,14 +1350,16 @@ static void** CtxVT = nullptr;
 static OMSetRT_t  OrigOMSetRT = nullptr;
 static ClearDSV_t OrigClearDSV = nullptr;
 static const int VT_OMSETRT = 33, VT_CLEARDSV = 53; // ID3D11DeviceContext vtable slots
-struct DsvStat { ID3D11DepthStencilView* dsv; int binds, clears; UINT w, h, fmt, bindFlags, samples; float clearDepth; };
+struct DsvStat { ID3D11DepthStencilView* dsv; ID3D11Texture2D* tex; int binds, clears; UINT w, h, fmt, bindFlags, samples; float clearDepth; };
 static DsvStat DsvNow[16]; static int DsvNowN = 0;
 static DsvStat DsvShown[16]; static int DsvShownN = 0;
 static UINT BackW = 0, BackH = 0;
 static bool ProbeOn = false;
 static ID3D11Device* PDev = nullptr; static ID3D11DeviceContext* PCtx = nullptr;
 // Screen-sized depth buffers we keep a handle to: thumbnail (SRV) + CPU read of one pixel (staging copy).
-struct DepthCand { ID3D11DepthStencilView* dsv; ID3D11Texture2D* tex; ID3D11ShaderResourceView* srv; ID3D11Texture2D* staging; bool pending; float value; };
+struct DepthCand { ID3D11DepthStencilView* dsv; ID3D11Texture2D* tex; ID3D11ShaderResourceView* srv; ID3D11Texture2D* staging; bool pending; float value; int unseen; };
+static void DropDepthCopy();
+static int CandDropped = 0; // buffers the game stopped using (e.g. recreated after a loading screen)
 static DepthCand Cands[6]; static int CandN = 0;
 static bool  ReadMouse = false; static double NextRead = 0;
 // Auto near plane: twice a second, look at the game's depth on plain board floor around you and work
@@ -1372,7 +1374,6 @@ static float AutoNearValue = 0; static int AutoNearUsed = 0;
 static void AutoNearApply(float n);
 static void AddCand(ID3D11DepthStencilView* dsv)
 {
-	for (int i = 0; i < CandN; i++) if (Cands[i].dsv == dsv) return;
 	if (CandN >= 6 || !PDev) return;
 	ID3D11Resource* res = nullptr; dsv->GetResource(&res); if (!res) return;
 	ID3D11Texture2D* tex = nullptr; res->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&tex); res->Release();
@@ -1409,6 +1410,7 @@ static DsvStat* DsvFind(ID3D11DepthStencilView* d)
 		{
 			D3D11_TEXTURE2D_DESC td; tex->GetDesc(&td);
 			n.w = td.Width; n.h = td.Height; n.fmt = td.Format; n.bindFlags = td.BindFlags; n.samples = td.SampleDesc.Count;
+			n.tex = tex; // identity only (no reference kept): valid for this frame
 			tex->Release();
 		}
 		res->Release();
@@ -1421,12 +1423,11 @@ static ID3D11Texture2D* SceneTex();
 static bool IsSceneDepth(ID3D11DepthStencilView* dsv)
 {
 	ID3D11Texture2D* t = SceneTex(); if (!t) return false;
-	static ID3D11DepthStencilView* lastDsv = nullptr; static bool lastRes = false; static ID3D11Texture2D* lastTex = nullptr;
-	if (dsv == lastDsv && t == lastTex) return lastRes;      // cache: same view as last time
+	// The game recreates views (and reuses their addresses), so always compare the buffer itself.
+	if (DsvStat* st = DsvFind(dsv)) if (st->tex) return st->tex == t;
 	ID3D11Resource* r = nullptr; dsv->GetResource(&r);
 	bool res = false;
 	if (r) { ID3D11Texture2D* rt = nullptr; r->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&rt); res = (rt == t); if (rt) rt->Release(); r->Release(); }
-	lastDsv = dsv; lastTex = t; lastRes = res;
 	return res;
 }
 static void STDMETHODCALLTYPE HookOMSetRT(ID3D11DeviceContext* c, UINT n, ID3D11RenderTargetView* const* rtv, ID3D11DepthStencilView* dsv)
@@ -1490,7 +1491,34 @@ static void ProbeFrame() // once per frame: publish last frame's numbers, start 
 	LastSceneBinds = SceneBinds; SceneBinds = 0;
 	if (InjectedThisFrame) { InjectOk++; InjectMiss = 0; } else { InjectMiss++; }
 	InjectedThisFrame = false;
+	{ // screen size can change (window resize, fullscreen toggle)
+		DXGI_SWAP_CHAIN_DESC d; IDXGISwapChain* sc = API ? (IDXGISwapChain*)API->SwapChain : nullptr;
+		if (sc && SUCCEEDED(sc->GetDesc(&d))) { BackW = d.BufferDesc.Width; BackH = d.BufferDesc.Height; }
+	}
+	// Keep the candidates in step with the buffers the game really uses: mark the ones seen this frame,
+	// drop the ones not used for a second (the game recreated them), then add new ones in bind order.
+	for (int i = 0; i < CandN; i++) Cands[i].unseen++;
+	for (int i = 0; i < DsvNowN; i++)
+		for (int j = 0; j < CandN; j++)
+			if (DsvNow[i].tex && DsvNow[i].tex == Cands[j].tex) { Cands[j].unseen = 0; Cands[j].dsv = DsvNow[i].dsv; }
+	{
+		int k = 0; bool dropped = false;
+		for (int i = 0; i < CandN; i++)
+		{
+			DepthCand& c = Cands[i];
+			D3D11_TEXTURE2D_DESC td{}; if (c.tex) c.tex->GetDesc(&td);
+			if (c.unseen > 60 || td.Width != BackW || td.Height != BackH)
+			{
+				if (c.srv) c.srv->Release(); if (c.staging) c.staging->Release(); if (c.tex) c.tex->Release();
+				dropped = true; continue;
+			}
+			Cands[k++] = c;
+		}
+		CandN = k;
+		if (dropped) { CandDropped++; DropDepthCopy(); }
+	}
 	for (int i = 0; i < DsvNowN; i++) if (DsvNow[i].w == BackW && DsvNow[i].h == BackH) AddCand(DsvNow[i].dsv);
+	if (DepthBuf >= CandN && CandN > 0) DepthBuf = 0;
 	DsvNowN = 0;
 	if ((!ReadMouse && !(AutoNear && UnderChars)) || !PCtx) return;
 	// copy the buffer(s) to CPU-readable textures, read them a frame later
@@ -1576,6 +1604,7 @@ static void ProbeUI()
 	}
 	ImGui::Separator();
 	ImGui::Text("Screen-sized depth buffers: %d", CandN);
+	if (CandDropped) { ImGui::SameLine(); ImGui::TextDisabled("(renewed %d time(s) after the game recreated them)", CandDropped); }
 	ImGui::Checkbox("Read depth under the mouse (2x per second)", &ReadMouse);
 	V3 hit; float vz = -1;
 	if (ScreenToFloor(ImGui::GetIO().MousePos, FloorY(), hit)) { vz = Dot(hit - PEye, Norm(PFront)); }
@@ -1708,6 +1737,7 @@ static std::string IFErr;
 static float IFHeightTol = 0.30f;       // how far above/below the board height still counts as floor (m)
 static const UINT BOARD_TEX = 2048;
 template <class T> static void SafeRel(T*& p) { if (p) { p->Release(); p = nullptr; } }
+static void DropDepthCopy() { SafeRel(IFDepthSRV); SafeRel(IFDepthCopy); IFDepthW = IFDepthH = 0; }
 static void ReleaseInFrame()
 {
 	SafeRel(IFBoardVS); SafeRel(IFBoardPS); SafeRel(IFLayout); SafeRel(IFDecalVS); SafeRel(IFDecalPS); SafeRel(IFVB); IFVBCap = 0; SafeRel(IFCB);
