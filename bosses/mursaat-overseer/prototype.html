@@ -1,0 +1,727 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MO Chess Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: one centered column — board, controls, squad roster, legend */
+:root {
+  --bg: #e9eae4;
+  --fg: #23262a;
+  --muted: #5d625f;
+  --tile: #aeaea6;
+  --sq-dark: #9c9c93;
+  --line: #525252;
+  --subline: rgba(40,42,40,.28);
+  --jade: #1f8a74;
+  --jade-soft: rgba(31,138,116,.18);
+  --pillar: #f2f2ee;
+  --panel: #f6f6f2;
+  --token: #2b2f33;
+  --token-fg: #f4f4ef;
+  --danger: #b23a2e;
+  --role: #b8860b;
+  --boss: #2e7d6b;
+  --display: "Cinzel", Georgia, serif;
+  --body: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #17191a; --fg: #e6e7e2; --muted: #9ea39f; --panel: #202324;
+  --jade: #3fbf9f; --jade-soft: rgba(63,191,159,.2); --danger: #e0685a; --role: #e0b44a; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #17191a; --fg: #e6e7e2; --muted: #9ea39f; --panel: #202324;
+  --jade: #3fbf9f; --jade-soft: rgba(63,191,159,.2); --danger: #e0685a; --role: #e0b44a; color-scheme: dark }
+
+body { background: var(--bg); color: var(--fg); font-family: var(--body); }
+.wrap { max-width: 1240px; margin: 0 auto; padding-inline: 24px; padding-block: 36px 48px; display: grid; gap: 22px; }
+h1 { font-family: var(--display); font-weight: 600; font-size: 1.6rem; letter-spacing: .04em; margin: 0; text-wrap: balance; }
+h2 { font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+.sub { color: var(--muted); margin: 4px 0 0; line-height: 1.5; max-width: 62ch; }
+.board { width: 100%; max-width: 100%; aspect-ratio: 900 / 880; display: block; touch-action: manipulation; }
+.board text { font-family: var(--mono); font-size: 13px; fill: var(--muted); }
+.board .side { font-family: var(--body); font-size: 15px; font-weight: 600; letter-spacing: .06em; }
+.board .glyph { font-family: "Segoe UI Symbol", "Noto Sans Symbols2", "DejaVu Sans", serif; font-size: 46px; fill: var(--token-fg); pointer-events: none; }
+.board .pname { font-family: var(--mono); font-size: 13px; fill: var(--token-fg); pointer-events: none; }
+.board .rlabel { font-family: var(--body); font-size: 13px; font-weight: 600; fill: var(--fg); }
+.tok { cursor: pointer; }
+.tok:focus { outline: none; }
+.tok:focus-visible circle.body { stroke: var(--jade); stroke-width: 5; }
+.bar { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+button { font: 600 .92rem var(--body); padding: 9px 16px; border-radius: 6px; border: 1px solid var(--jade); background: var(--jade); color: #fff; cursor: pointer; }
+button.ghost { background: transparent; color: var(--jade); }
+button:focus-visible { outline: 3px solid var(--jade-soft); outline-offset: 2px; }
+.bar label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.bar input { accent-color: var(--jade); width: 16px; height: 16px; }
+#readout { font-family: var(--mono); min-height: 1.4em; color: var(--jade); }
+.roster { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 6px 16px; padding: 0; margin: 0; list-style: none; }
+.roster li { display: grid; grid-template-columns: 2.4em 2.6em 1fr auto; gap: 6px; align-items: baseline; padding: 6px 8px; border-radius: 4px; cursor: pointer; font-variant-numeric: tabular-nums; }
+.roster li:hover, .roster li.sel { background: var(--jade-soft); }
+.roster .g { font-size: 1.25rem; }
+.roster .sq { font-family: var(--mono); color: var(--muted); }
+.roster .n { font-family: var(--mono); font-size: .85rem; }
+.roster .stuck { color: var(--danger); font-weight: 600; }
+.roster .hit { color: var(--jade); font-weight: 600; font-size: .8rem; margin-left: 4px; }
+.roster .kd { color: var(--muted); font-size: .78rem; margin-left: 5px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 0 0 12px; }
+.stat { display: grid; gap: 2px; }
+.stat b { font: 600 1.35rem var(--mono); font-variant-numeric: tabular-nums; }
+.stat span { color: var(--muted); font-size: .82rem; }
+.findings { margin: 0; padding-left: 1.2em; line-height: 1.55; max-width: 70ch; }
+.simbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+.roster .rl { color: var(--role); font-size: .8rem; font-weight: 600; margin-left: 4px; }
+.panel { background: var(--panel); padding: 14px 16px; border-radius: 6px; }
+.summary { margin: 0 0 10px; line-height: 1.5; }
+.summary b.bad { color: var(--danger); }
+.legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px 20px; }
+.key { display: flex; gap: 10px; align-items: center; line-height: 1.35; font-size: .9rem; }
+.sw { flex: none; width: 22px; height: 22px; border-radius: 3px; }
+.clock { font: 600 1.15rem var(--mono); margin-left: auto; font-variant-numeric: tabular-nums; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+.log { margin: 0; padding-left: 0; list-style: none; max-height: 260px; overflow-y: auto; font-size: .9rem; line-height: 1.55; font-variant-numeric: tabular-nums; }
+.log .t { font-family: var(--mono); color: var(--muted); margin-right: 6px; }
+.log .bad { color: var(--danger); font-weight: 600; }
+.log .blue { color: #2f6fc0; font-weight: 600; }
+.roster li.dead { opacity: .45; text-decoration: line-through; }
+.note { color: var(--muted); font-size: .88rem; line-height: 1.5; margin: 0; max-width: 66ch; }
+.hint { color: var(--muted); font-size: .88rem; }
+select { font: 500 .92rem var(--body); padding: 6px 8px; border-radius: 6px; border: 1px solid var(--subline); background: var(--panel); color: var(--fg); }
+.log .warn { color: #b06f00; font-weight: 600; }
+header { text-align: center; display: grid; justify-items: center; gap: 6px; }
+h1 { font-size: clamp(1.7rem, 3vw, 2.4rem); }
+.sub { margin-inline: auto; max-width: 72ch; font-size: 1.02rem; }
+.demo { grid-template-columns: minmax(0, 1.25fr) minmax(340px, 1fr); align-items: start; }
+.stage, .side { display: grid; gap: 14px; min-width: 0; }
+.side .roster { grid-template-columns: 1fr; }
+@media (max-width: 980px) { .demo { grid-template-columns: 1fr; } .side .roster { grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); } }
+@media (max-width: 480px) { .wrap { padding-inline: 16px; } }
+.tabs { justify-content: center; display: flex; gap: 4px; border-bottom: 1px solid var(--subline); }
+.tabs button { background: transparent; color: var(--muted); border: none; border-bottom: 3px solid transparent; border-radius: 0; padding: 10px 14px; }
+.tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--jade); }
+.sizebar { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; }
+.seg { background: transparent; color: var(--muted); border: 1px solid var(--subline); padding: 6px 12px; font-size: .85rem; }
+.seg[aria-pressed="true"] { background: var(--jade-soft); color: var(--fg); border-color: var(--jade); }
+.tabpane { display: grid; gap: 18px; }
+[hidden] { display: none !important; }
+.logbox summary { cursor: pointer; font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+.logbox[open] summary { margin-bottom: 8px; }
+.phase { display: grid; gap: 4px; background: var(--panel); padding: 12px 16px; border-radius: 6px; border-left: 4px solid var(--jade); }
+.phase b { font-size: 1rem; }
+.phase span { color: var(--muted); line-height: 1.45; }
+</style>
+<style>html,body{margin:0}body{font-size:14px;-webkit-font-smoothing:antialiased}img{max-width:100%}</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Mursaat Overseer · Chess Board</h1>
+    <p class="sub">A chess variant for Mursaat Overseer CM. Every player gets a random piece and must make a legal chess move every 10 seconds, timed to the spikes, and can only damage the boss from a square their piece attacks. Step through one fight in Demo, or open Simulation for the numbers from many simulated fights.</p>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" id="tb-sim" aria-selected="true">Demo</button>
+    <button role="tab" id="tb-res" aria-selected="false">Simulation</button>
+  </nav>
+  <div class="sizebar" role="group" aria-label="Board size">
+    <span class="hint">Board</span>
+    <button class="seg" id="sz8" aria-pressed="false">8×8 · tiles split 2×2</button>
+    <button class="seg" id="sz12" aria-pressed="true">12×12 · matches the floor: each tile is 3×3 plates</button>
+  </div>
+
+  <div id="tab-sim" class="tabpane demo">
+    <div class="stage">
+      <svg class="board" id="board" viewBox="-60 -40 900 880" role="img" aria-label="8 by 8 chess grid on the Mursaat Overseer board"></svg>
+      <div id="readout">Hover a square, or click a player to see their legal squares</div>
+    </div>
+    <div class="side">
+      <div class="phase" aria-live="polite"><b id="phase-title">Formation</b><span id="phase-text"></span></div>
+      <div class="bar">
+        <button class="ghost" id="back" disabled>◀ Step back</button>
+        <button id="step">Step forward ▶</button>
+        <button class="ghost" id="auto">Auto-play</button>
+        <button class="ghost" id="reset">Restart</button>
+        <span id="clock" class="clock">0:00</span>
+      </div>
+      <section class="panel">
+        <h2>Squad</h2>
+        <p class="summary" id="summary"></p>
+        <ul class="roster" id="roster"></ul>
+      </section>
+      <details class="panel logbox">
+        <summary>Fight log</summary>
+        <ol class="log" id="log"></ol>
+      </details>
+    </div>
+  </div>
+
+  <div id="tab-res" class="tabpane" hidden>
+  <section class="panel" id="sim">
+    <h2>Simulation results</h2>
+    <div class="simbar"><button class="ghost" id="runsim">Run 500 more fights</button><span class="hint" id="simnote"></span></div>
+    <div class="stats" id="stats"></div>
+    <ul class="findings" id="findings"></ul>
+  </section>
+  </div>
+</div>
+
+<script>
+let N = 8, S = 100, SUB = 2, H = 50; // board size, square size in px (board is 800px), squares per MO tile side, half square
+const NS = "http://www.w3.org/2000/svg";
+const svg = document.getElementById("board");
+const el = (t, a, p = svg) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); p.appendChild(e); return e; };
+const FILES = "abcdefghijkl";
+let files = FILES.slice(0, N);
+const sqName = (c, r) => files[c] + (N - r);
+const $ = id => document.getElementById(id);
+const PILLARS = [{ rank: 6, role: "Protect", sq: "a6" }, { rank: 4, role: "Dispel", sq: "a4" }, { rank: 2, role: "Claim", sq: "a2" }];
+let overG, hl, pillG, bossG, bossRect, bossDot, bossTxt, tokG, FORM = [];
+
+/* ---------- static board (rebuilt when the board size changes) ---------- */
+function buildBoard(n) {
+  N = n; S = 800 / N; SUB = N / 4; H = S / 2; files = FILES.slice(0, N);
+  svg.innerHTML = "";
+  el("rect", { x: 0, y: 0, width: 800, height: 800, fill: "var(--tile)" });
+  const chessG = el("g", { id: "g-chess" });
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++)
+    if ((r + c) % 2) el("rect", { x: c*S, y: r*S, width: S, height: S, fill: "var(--sq-dark)" }, chessG);
+  for (let i = 1; i < N; i++) {
+    if (i % SUB === 0) continue;
+    el("line", { x1: i*S, y1: 0, x2: i*S, y2: 800, stroke: "var(--subline)", "stroke-width": 1.5, "stroke-dasharray": "6 6" }, chessG);
+    el("line", { x1: 0, y1: i*S, x2: 800, y2: i*S, stroke: "var(--subline)", "stroke-width": 1.5, "stroke-dasharray": "6 6" }, chessG);
+  }
+  for (let i = 0; i <= 4; i++) {
+    el("line", { x1: i*200, y1: 0, x2: i*200, y2: 800, stroke: "var(--line)", "stroke-width": 7 });
+    el("line", { x1: 0, y1: i*200, x2: 800, y2: i*200, stroke: "var(--line)", "stroke-width": 7 });
+  }
+  for (let i = 0; i < N; i++) {
+    el("text", { x: i*S + H, y: 826, "text-anchor": "middle" }).textContent = files[i];
+    el("text", { x: -16, y: i*S + H + 5, "text-anchor": "middle" }).textContent = N - i;
+  }
+  el("text", { x: 400, y: -14, "text-anchor": "middle", class: "side" }).textContent = "E  ← Squad start · Soldiers form        Scouts spawn →  W";
+  overG = el("g", {});
+  hl = el("rect", { width: S, height: S, fill: "none", stroke: "var(--jade)", "stroke-width": 4, visibility: "hidden", "pointer-events": "none" });
+  pillG = el("g", {});
+  PILLARS.forEach(p => {
+    const y = (N - p.rank) * S;
+    el("circle", { cx: S, cy: y, r: 11, fill: "var(--pillar)", stroke: "var(--role)", "stroke-width": 3 }, pillG);
+    el("text", { x: S + 18, y: y - 10, class: "rlabel" }, pillG).textContent = p.role;
+  });
+  bossG = el("g", {});
+  bossRect = el("rect", { width: S, height: S, fill: "var(--boss)", opacity: .3 }, bossG);
+  bossDot = el("circle", { r: 48, opacity: .85, fill: "var(--boss)", stroke: "var(--line)", "stroke-width": 4 }, bossG);
+  bossTxt = el("text", { "text-anchor": "middle", class: "rlabel", style: "fill:#f4f4ef;font-size:20px" }, bossG); bossTxt.textContent = "MO";
+  tokG = el("g", {});
+  FORM = [];
+  for (let rank = 6; rank >= 2; rank--) for (const c of [0, 1]) FORM.push({ c, r: N - rank });
+}
+buildBoard(12);
+
+/* ---------- rules ---------- */
+const PIECES = [
+  { k: "K", n: "King", g: "♚" }, { k: "Q", n: "Queen", g: "♛" },
+  { k: "R", n: "Rook", g: "♜" }, { k: "R", n: "Rook", g: "♜" },
+  { k: "B", n: "Bishop", g: "♝" }, { k: "B", n: "Bishop", g: "♝" },
+  { k: "N", n: "Knight", g: "♞" }, { k: "N", n: "Knight", g: "♞" },
+  { k: "P", n: "Pawn", g: "♟" }, { k: "P", n: "Pawn", g: "♟" },
+];
+const ORTH = [[1,0],[-1,0],[0,1],[0,-1]], DIAG = [[1,1],[1,-1],[-1,1],[-1,-1]];
+const KN = [[1,2],[2,1],[-1,2],[-2,1],[1,-2],[2,-1],[-1,-2],[-2,-1]];
+const inB = (c, r) => c >= 0 && c < N && r >= 0 && r < N;
+let boss = { c: 3.5, r: 3.5 }; // MO's square; it starts in the centre and then always stands on the Claim player
+const isBoss = (c, r) => c === boss.c && r === boss.r;
+const bossFor = cl => ({ c: cl.c, r: cl.r });
+const blockOn = () => false; // players walk through each other; only the end square counts
+
+// legal squares for p, with squadmate positions `occ` (Set of "c,r") and squares already taken this prompt
+function legal(p, occ = occSet(p), taken = new Set()) {
+  if (!p.piece || !p.alive) return [];
+  const out = [], blk = blockOn();
+  const free = (c, r) => inB(c, r) && !(blk && occ.has(c + "," + r)); // players can walk through and stand under MO, as in the game
+  const ok = (c, r) => !taken.has(c + "," + r);
+  const slide = dirs => dirs.forEach(([dc, dr]) => { let c = p.c + dc, r = p.r + dr; while (free(c, r)) { if (ok(c, r)) out.push([c, r]); c += dc; r += dr; } });
+  const hop = list => list.forEach(([dc, dr]) => { const c = p.c + dc, r = p.r + dr; if (free(c, r) && ok(c, r)) out.push([c, r]); });
+  switch (p.piece.k) {
+    case "R": slide(ORTH); break;
+    case "B": slide(DIAG); break;
+    case "Q": slide([...ORTH, ...DIAG]); break;
+    case "K": hop([...ORTH, ...DIAG]); break;
+    case "N": hop(KN); break;
+    case "P": if (free(p.c + 1, p.r)) { if (ok(p.c + 1, p.r)) out.push([p.c + 1, p.r]); if (!p.moved && free(p.c + 2, p.r) && ok(p.c + 2, p.r)) out.push([p.c + 2, p.r]); } break;
+  }
+  return out;
+}
+const occSet = self => new Set(squad.filter(q => q !== self && q.alive).map(q => q.c + "," + q.r));
+
+// hit rule: boss square this piece attacks from (c,r), or null. Squadmates don't block hits.
+function hitTarget(p, c = p.c, r = p.r) {
+  if (!p.piece || !p.alive) return null;
+  if (isBoss(c, r)) return [c, r]; // Claim stands under MO
+  let hit = null;
+  const ray = dirs => dirs.some(([dc, dr]) => { let x = c + dc, y = r + dr; while (inB(x, y)) { if (isBoss(x, y)) { hit = [x, y]; return true; } x += dc; y += dr; } return false; });
+  const hop = list => list.some(([dc, dr]) => isBoss(c + dc, r + dr) && (hit = [c + dc, r + dr]));
+  ({ R: () => ray(ORTH), B: () => ray(DIAG), Q: () => ray([...ORTH, ...DIAG]), K: () => hop([...ORTH, ...DIAG]), N: () => hop(KN), P: () => hop([[1, 1], [1, -1]]) })[p.piece.k]();
+  return hit;
+}
+const dist = (c, r) => Math.max(Math.abs(c - boss.c), Math.abs(r - boss.r));
+
+/* ---------- board control: enemy tiles, Jade Scouts and Soldiers ---------- */
+// enemy[tl] = tile claimed by the Mursaat (hurts anyone standing on it). The west half (right side here) starts enemy.
+const SCOUT_HP = 94644, SOLDIER_HP = 475000, SCOUT_SPEED = 1; // MO tiles per 10s cycle: 5s per chess square, 40s end to end; they start moving with the first spikes
+const CLAIMS_PER_CYCLE = 1; // Claim recharges in 8s (GW2 wiki)
+// every square a piece attacks from (c,r); squadmates and MO don't block
+function attackSet(p, c = p.c, r = p.r) {
+  const out = new Set(); if (!p.piece) return out;
+  const ray = dirs => dirs.forEach(([dc, dr]) => { let x = c + dc, y = r + dr; while (inB(x, y)) { out.add(x + "," + y); x += dc; y += dr; } });
+  const hop = list => list.forEach(([dc, dr]) => { if (inB(c + dc, r + dr)) out.add((c + dc) + "," + (r + dr)); });
+  ({ R: () => ray(ORTH), B: () => ray(DIAG), Q: () => ray([...ORTH, ...DIAG]), K: () => hop([...ORTH, ...DIAG]), N: () => hop(KN), P: () => hop([[1, 1], [1, -1]]) })[p.piece.k]();
+  return out;
+}
+// can p hit a unit standing on MO tile tl? (attacks any square of that tile, or stands on it)
+const hitsTile = (p, tl) => { if (tileOf(p.c, p.r) === tl) return true; const a = attackSet(p); for (let dx = 0; dx < SUB; dx++) for (let dy = 0; dy < SUB; dy++) if (a.has(((tl % 4) * SUB + dx) + "," + (Math.floor(tl / 4) * SUB + dy))) return true; return false; };
+const unitTile = u => Math.floor(u.row) * 4 + Math.max(0, Math.min(3, Math.floor(u.x)));
+const pick = a => a[Math.floor(Math.random() * a.length)];
+function shuffle(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+const fmt = sec => Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0");
+
+/* ---------- state ---------- */
+let quiet = false;
+let squad, phase, t, logHTML, prev, ev = null, bubbleReady = 0, hp = 30e6, bphase = 0, pat = 0, blueDue = 27, blueHeld = 0, holdDps = false, enemy = [], units = [], selected = null, hist = [], idx = 0, autoTimer = null;
+function fresh() {
+  const kinds = shuffle(KINDS);
+  squad = FORM.map((p, i) => ({ id: "P" + (i + 1), c: p.c, r: p.r, piece: null, role: null, alive: true, moved: false, kind: kinds[i].kind, dps: kinds[i].dps }));
+  phase = "formation"; t = 0; prev = null; logHTML = ""; selected = null; ev = null; bubbleReady = 0; hp = HP_MAX; bphase = 0; pat = 0; boss = { c: (N - 1) / 2, r: (N - 1) / 2 }; blueDue = 27; blueHeld = 0; holdDps = false;
+  enemy = [...Array(16).keys()].map(i => i % 4 >= 2); units = [0, 1, 2, 3].map(row => ({ kind: "Scout", row, x: 3.5, hp: SCOUT_HP, down: 0, shield: false }));
+  log("Squad lined up 2×5 on a2–a6 and b2–b6.");
+}
+const log = (h, time = true) => { logHTML += `<li>${time && phase !== "formation" && phase !== "roles" ? `<span class="t">${fmt(t)}</span>` : ""}${h}</li>`; };
+const tag = p => `${p.id}${p.piece ? " " + p.piece.g : ""}`;
+const snap = () => JSON.parse(JSON.stringify({ squad, phase, t, logHTML, prev, ev, bubbleReady, hp, bphase, pat, boss, blueDue, blueHeld, holdDps, enemy, units }));
+const restore = s => { ({ squad, phase, t, logHTML, prev, ev, bubbleReady, hp, bphase, pat, boss, blueDue, blueHeld, holdDps, enemy, units } = JSON.parse(JSON.stringify(s))); selected = null; render(); };
+
+/* ---------- hazards (placeholder patterns) ---------- */
+// MO tile index 0..15 = row*4 + col, row 0 = top (ranks 7–8), col 0 = left (files a–b)
+const tileOf = (c, r) => Math.floor(r / SUB) * 4 + Math.floor(c / SUB);
+const CENTRE = [5, 6, 9, 10];
+// Blue: 4 tiles per player, always one centre and one corner; 4 rotations of one base pattern
+const BLUE_BASE = [[1, 1], [0, 0], [2, 0], [0, 2]]; // [col,row]
+const rot = ([x, y]) => [3 - y, x];
+const BLUES = [0, 1, 2, 3].map(k => { let pts = BLUE_BASE; for (let i = 0; i < k; i++) pts = pts.map(rot); return pts.map(([x, y]) => y * 4 + x); });
+// Spikes: the real per-phase sequences (Snow Crows), rotated to this board. One pattern every 10s,
+// restarting at 75/50/25%. Assumed to loop if a phase lasts longer than its sequence.
+const SPIKES = [[[3, 7, 11, 15], [0, 1, 2, 3], [2, 6, 10, 14], [4, 5, 6, 7], [1, 5, 9, 13], [8, 9, 10, 11], [0, 4, 8, 12], [12, 13, 14, 15]], [[0, 1, 2, 3, 7, 11, 15], [2, 4, 5, 6, 7, 10, 14], [1, 5, 8, 9, 10, 11, 13], [0, 4, 8, 12, 13, 14, 15], [0, 1, 2, 3, 4, 8, 12], [1, 4, 5, 6, 7, 9, 13], [2, 6, 8, 9, 10, 11, 14], [3, 7, 11, 12, 13, 14, 15]], [[0, 1, 2, 3, 5, 7, 9, 11, 13, 15], [2, 4, 5, 6, 7, 10, 12, 13, 14, 15], [1, 3, 5, 7, 8, 9, 10, 11, 13, 15], [0, 4, 5, 6, 7, 8, 12, 13, 14, 15], [0, 1, 2, 3, 4, 6, 8, 10, 12, 14], [1, 4, 5, 6, 7, 9, 12, 13, 14, 15], [0, 2, 4, 6, 8, 9, 10, 11, 12, 14], [0, 1, 2, 3, 7, 8, 9, 10, 11, 15]], [[0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 14, 15], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 13], [0, 1, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15], [2, 3, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], [1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14], [0, 1, 2, 3, 4, 7, 8, 11, 12, 13, 14, 15]]];
+const BLUE_TIMES = Array.from({ length: 12 }, (_, i) => 27 + 30 * i);
+const HP_MAX = 30e6;
+// squad makeup: damage only counts while the player's piece attacks the boss
+const KINDS = [...Array(6).fill({ kind: "DPS", dps: 25000 }), ...Array(2).fill({ kind: "Support", dps: 20000 }), ...Array(2).fill({ kind: "Healer", dps: 3000 })];
+const tileName = tl => `col ${tl % 4 + 1}, row ${4 - Math.floor(tl / 4)}`;
+const nb = tl => [[1,0],[-1,0],[0,1],[0,-1]].map(([dx, dy]) => [tl % 4 + dx, Math.floor(tl / 4) + dy]).filter(([x, y]) => x >= 0 && x < 4 && y >= 0 && y < 4).map(([x, y]) => y * 4 + x);
+
+/* ---------- phases ---------- */
+const PH = {
+  formation: ["Formation", "The squad lines up 2×5 on the start side before the pull."],
+  roles: ["Pick up roles", "Three random players take the light pillars: Claim, Protect and Dispel."],
+  deal: ["Pull · deal pieces", "Taking the last pillar starts the fight. Claim always plays the only Pawn and walks along rank 2 to the far edge, and MO always runs to Claim's square, so the boss's position is predictable. Everyone else gets a random piece from the King, Queen, Rooks, Bishops and Knights."],
+  check: ["Move prompt · position check", "The system reads every position and works out each player's legal end squares (jade dots). Players can walk through each other; only the end square counts. A red ring means the piece has no legal end square at all. Each prompt opens the moment a spike fires (dark green). Tokens show each player's checked square. Players choose squares the next spike won't hit when they can; anyone marked STEPPED OFF stood under it, walked off before it fired (losing half their damage that cycle) and moves from their checked square now."],
+  move: ["Move", "Players have 5 seconds to move. The end square must be a legal move from their last checked square. Each one heads for a square where their piece attacks MO, or the closest square they can reach. A Pawn that reaches the h-file promotes to a Queen."],
+  free: ["Between prompts", ""],
+  hit: ["Line check", "Each player's final square is checked against the boss. Jade lines show who can deal damage. Green tiles are the next spike, warning now and firing at the next prompt. Players move freely until then to dodge it and reach their Blue. When a Blue lands, click a player to see where their Blue spawned. Protect's bubble (gold) stops spikes, not Blues, once every 180 seconds."],
+  end: ["Fight over", ""],
+};
+
+function advance() {
+  if (phase === "formation") {
+    phase = "roles";
+    const holders = shuffle(squad).slice(0, 3);
+    PILLARS.forEach((pl, i) => {
+      const h = holders[i], at = squad.find(q => sqName(q.c, q.r) === pl.sq);
+      if (at !== h) { [at.c, at.r, h.c, h.r] = [h.c, h.r, at.c, at.r]; }
+      h.role = pl.role;
+      log(`${h.id} takes <b>${pl.role}</b> at the ${pl.sq} pillar.`);
+    });
+  } else if (phase === "roles") {
+    phase = "deal"; t = 0;
+    // Claim always plays the Pawn; everyone else draws from the rest of the set
+    // no other Pawns: the 9 others get the King, Queen, 2 Rooks, 2 Bishops, 2 Knights and one extra Rook, Bishop or Knight
+    const rest = PIECES.filter(x => x.k !== "P").concat([pick(PIECES.filter(x => "RBN".includes(x.k)))]);
+    const deck = shuffle(rest); let d = 0;
+    squad.forEach(p => p.piece = p.role === "Claim" ? PIECES.find(x => x.k === "P") : deck[d++]);
+    squad.forEach(p => p.blue = Math.floor(Math.random() * 4));
+    log("Boss pulled. Pieces: " + squad.map(p => `${p.id} ${p.piece.g} ${p.piece.n}`).join(", "));
+  } else if (phase === "deal" || phase === "hit") {
+    if (phase === "hit") t = ev && ev.nextPrompt ? ev.nextPrompt : t + 5;
+    phase = "check"; prev = null;
+    ev = ev && ev.next ? { fired: ev.next } : null; // the spike that fires as this prompt opens
+    if (t === 0) log("First move prompt opens at the pull.");
+    else log(`Spike fired at ${fmt(t)} (${["100–75%", "75–50%", "50–25%", "25–0%"][bphase]} pattern ${(pat - 1) % SPIKES[bphase].length + 1}). The prompt opens with it.`);
+    const stuck = squad.filter(p => p.alive && !legal(p).length);
+    log(`Move prompt. ${stuck.length ? `<span class="bad">${stuck.map(tag).join(", ")} ${stuck.length > 1 ? "have" : "has"} no legal square.</span>` : "Everyone has a legal square."}`);
+  } else if (phase === "check") {
+    phase = "move"; t += 5;
+    const start = squad.map(p => ({ c: p.c, r: p.r }));
+    const occ = new Map(squad.map(p => [p, occSet(p)]));
+    const taken = new Set(), moves = [], promos = [];
+    prev = squad.map(p => ({ c: p.c, r: p.r, alive: p.alive }));
+    // Claim moves first and MO runs to them; then players with the fewest options pick their squares first
+    const claimP = squad.find(p => p.role === "Claim" && p.alive);
+    const pending = shuffle(squad.filter(p => p.alive && p !== claimP));
+    const nextUp = () => {
+      if (claimP && claimP.alive && !claimP._done) return claimP;
+      let best = null, bn = Infinity;
+      pending.forEach(q => { if (q._done) return; const n = legal(q, occ.get(q), taken).length; if (n < bn) { bn = n; best = q; } });
+      return best;
+    };
+    squad.forEach(q => q._done = false);
+    for (let p = nextUp(); p; p = nextUp()) { p._done = true; (p => {
+      let opts = legal(p, occ.get(p), taken);
+      // don't take a square that is someone else's last option
+      const others = pending.filter(q => !q._done && q !== p);
+      const lastOf = new Set(others.map(q => legal(q, occ.get(q), taken)).filter(o => o.length === 1).map(o => o[0].join(",")));
+      if (opts.some(o => !lastOf.has(o.join(",")))) opts = opts.filter(o => !lastOf.has(o.join(",")));
+      if (!opts.length) { p.alive = false; moves.push(`<span class="bad">${tag(p)} ${legal(p, occ.get(p)).length ? "lost its last squares to squadmates" : "had no legal square"} and died</span>`); return; }
+      // the spike sequence is fixed, so players pick a square the next spike won't hit, and not an enemy tile
+      const upcoming = SPIKES[bphase][pat % SPIKES[bphase].length];
+      const ok1 = opts.filter(([c, r]) => !enemy[tileOf(c, r)] && !upcoming.includes(tileOf(c, r)));
+      const ok2 = opts.filter(([c, r]) => !enemy[tileOf(c, r)]);
+      const pool = ok1.some(o => hitTarget(p, ...o)) || !ok2.length ? (ok1.length ? ok1 : opts) : ok2;
+      const hits = pool.filter(([c, r]) => hitTarget(p, c, r));
+      let choice;
+      if (hits.length) choice = pick(hits);
+      else { const d = Math.min(...pool.map(o => dist(...o))); choice = pick(pool.filter(o => dist(...o) === d)); }
+      moves.push(`${tag(p)} ${sqName(p.c, p.r)}→${sqName(...choice)}`);
+      taken.add(choice.join(","));
+      p.c = choice[0]; p.r = choice[1]; p.moved = true;
+      if (p.piece.k === "P" && p.c === N - 1) { p.piece = { k: "Q", n: "Queen", g: "♛" }; promos.push(`${p.id}${p.role ? " (" + p.role + ")" : ""} reached ${sqName(p.c, p.r)} and promoted to ♛ Queen`); }
+      if (p === claimP) { const nb2 = bossFor(p); if (nb2.c !== boss.c || nb2.r !== boss.r) { boss = nb2; moves.push(`MO runs to Claim on ${sqName(boss.c, boss.r)}`); } }
+    })(p); }
+    squad.forEach(q => delete q._done);
+    log("Moves: " + moves.join(", "));
+    promos.forEach(m => log(`<b>${m}</b>.`));
+    squad.filter(p => !p.alive && p.role && !p.roleLost).forEach(p => { p.roleLost = true; log(`<span class="bad">${p.role} holder ${p.id} is down. The squad has lost ${p.role}, which makes the fight very hard to finish.</span>`); });
+    if (!squad.some(p => p.alive)) { phase = "end"; PH.end[0] = "Squad wiped"; PH.end[1] = `Everyone died by ${fmt(t)}.`; log('<span class="bad">Squad wiped.</span>'); }
+  } else if (phase === "move") {
+    phase = "hit"; prev = null;
+    const alive = squad.filter(p => p.alive);
+    // 1. Claim reclaims one enemy tile per cycle: first where squadmates stand, then the tile Claim walks into next, then tiles near MO
+    const claimer = alive.find(p => p.role === "Claim");
+    if (claimer) {
+      const score = tl => {
+        let sc = alive.filter(p => tileOf(p.c, p.r) === tl).length * 10;
+        const ahead = claimer.piece.k === "P" && claimer.c < N - 1 ? tileOf(claimer.c + 1, claimer.r) : -1;
+        if (tl === ahead) sc += 6;
+        if (tl === tileOf(claimer.c, claimer.r)) sc += 8;
+        return sc - Math.abs(tl % 4 - Math.floor(claimer.c / SUB)) - Math.abs(Math.floor(tl / 4) - Math.floor(claimer.r / SUB)) * .5;
+      };
+      const targets = [...Array(16).keys()].filter(tl => enemy[tl]).sort((a, b) => score(b) - score(a)).slice(0, CLAIMS_PER_CYCLE);
+      targets.forEach(tl => enemy[tl] = false);
+      if (targets.length) log(`${tag(claimer)} (Claim) reclaims ${targets.map(tileName).join(" and ")}.`);
+    }
+    // 2. anyone still on an enemy tile steps off to survive and deals no damage this cycle
+    const burnt = alive.filter(p => enemy[tileOf(p.c, p.r)]);
+    if (burnt.length) log(`<span class="warn">${burnt.map(tag).join(", ")} ${burnt.length > 1 ? "are" : "is"} on an enemy tile</span>, so ${burnt.length > 1 ? "they step" : "steps"} off and deal${burnt.length > 1 ? "" : "s"} no damage this cycle.`);
+    const able = alive.filter(p => !burnt.includes(p));
+    // anyone whose square sits under the next spike has to step off before it fires and loses half their damage
+    const upcomingNow = SPIKES[bphase][pat % SPIKES[bphase].length];
+    const dodging = new Set(able.filter(p => upcomingNow.includes(tileOf(p.c, p.r))));
+    if (dodging.size) log(`${[...dodging].map(tag).join(", ")} ${dodging.size > 1 ? "stand" : "stands"} under the next spike, so ${dodging.size > 1 ? "they step" : "steps"} off before it fires and deal${dodging.size > 1 ? "" : "s"} half damage.`);
+    // 3. damage: Soldiers first (full damage from anyone who can hit them), MO with the rest, Scouts take cleave
+    const dpsMul = holdDps ? 0.5 : 1;
+    if (holdDps) log("The squad held half its DPS this cycle to delay the Blue.");
+    holdDps = false;
+    let bossDmg = 0; const onSoldier = new Set();
+    able.forEach(p => {
+      const sol = units.find(u => u.kind === "Soldier" && !u.shield && hitsTile(p, unitTile(u)));
+      const m = dpsMul * (dodging.has(p) ? 0.5 : 1);
+      if (sol) { sol.hp -= p.dps * 10 * m; onSoldier.add(p); return; }
+      if (hitTarget(p)) bossDmg += p.dps * 10 * m;
+      units.filter(u => u.kind === "Scout" && !u.down && !u.shield && hitsTile(p, unitTile(u))).forEach(u => u.hp -= p.dps * 10 * dpsMul * (hitTarget(p) ? 0.3 : 1));
+    });
+    const hitters = able.filter(p => hitTarget(p) && !onSoldier.has(p)), idle = alive.filter(p => !hitTarget(p));
+    log(`Line check: <b>${hitters.length} of ${alive.length}</b> hit MO${onSoldier.size ? `, ${onSoldier.size} on a Jade Soldier` : ""}.${idle.length ? " Not in position: " + idle.map(p => `${tag(p)} ${sqName(p.c, p.r)}`).join(", ") + "." : ""}`);
+    const before = hp; hp = Math.max(0, hp - bossDmg);
+    // 4. Scouts and Soldiers act: shields, deaths, movement, tile flips
+    const dispel = alive.find(p => p.role === "Dispel");
+    if (Math.round(t / 10) % 2 === 0) {
+      const live = units.filter(u => !u.down && !u.shield);
+      if (live.length) { const u = pick(live); u.shield = true;
+        if (dispel) { u.shield = false; log(`A ${u.kind} on ${tileName(unitTile(u))} gets a shield; ${tag(dispel)} (Dispel) removes it.`); }
+        else log(`<span class="warn">A ${u.kind} on ${tileName(unitTile(u))} is shielded and nobody can Dispel it.</span>`); }
+    }
+    const prot = alive.find(p => p.role === "Protect");
+    units.forEach(u => {
+      if (u.kind === "Scout") {
+        if (u.down) { u.down--; if (!u.down) u.hp = SCOUT_HP; return; }
+        if (u.hp <= 0) { u.down = 2; log(`Scout on ${tileName(unitTile(u))} is knocked down and regenerates for 15s.`); return; }
+        const was = unitTile(u); u.x -= SCOUT_SPEED;
+        if (u.x < 0) { Object.assign(u, { kind: "Soldier", x: 0, hp: SOLDIER_HP, down: 0 }); enemy[unitTile(u)] = true; log(`<span class="warn">A Scout reached the east edge on row ${4 - u.row} and became a Jade Soldier.</span>`); return; }
+        const now = unitTile(u); if (now !== was && !enemy[now]) { enemy[now] = true; log(`Scout claims ${tileName(now)} for the Mursaat.`); }
+      } else {
+        if (u.hp <= 0) { u.dead = true; log(`<b>Jade Soldier killed</b> on ${tileName(unitTile(u))}. It explodes; the squad dodges, and a new Scout spawns on the west edge.`); return; }
+        if (prot) { // fixates on Protect, one tile per cycle
+          const tc = Math.floor(prot.c / SUB), tr = Math.floor(prot.r / SUB), cc = Math.floor(u.x), cr = u.row;
+          if (cc !== tc) u.x = cc + Math.sign(tc - cc) + .5; else if (cr !== tr) u.row = cr + Math.sign(tr - cr);
+          const now = unitTile(u); if (!enemy[now]) { enemy[now] = true; log(`Jade Soldier chases Protect and claims ${tileName(now)}.`); }
+        }
+      }
+    });
+    units = units.map(u => u.dead ? { kind: "Scout", row: u.row, x: 3.5, hp: SCOUT_HP, down: 0, shield: false } : u);
+    const newPhase = Math.min(3, Math.floor((HP_MAX - hp) / (HP_MAX / 4)));
+    ev = { next: null, blue: false, bubble: null, nextPrompt: t + 5 };
+    if (hp <= 0) { phase = "end"; PH.end[0] = "Boss defeated"; PH.end[1] = `MO died at about ${fmt(t + 5)} with ${alive.length} of ${squad.length} alive.`; log(`<b>MO defeated at about ${fmt(t + 5)}.</b>`); }
+    else if (newPhase !== bphase) {
+      bphase = newPhase; pat = 0;
+      ev.nextPrompt = t + 15; // prompts pause until the first spike of the new phase (assumed 10s after the threshold)
+      log(`<b>MO reached ${100 - 25 * bphase}%.</b> Spike patterns restart. The system skips the prompt at ${fmt(t + 5)} and waits for the first new spike at ${fmt(t + 15)}.`);
+    }
+    if (phase !== "end") {
+      const next = SPIKES[bphase][pat % SPIKES[bphase].length]; pat++;
+      const fireAt = ev.nextPrompt, warnAt = fireAt - 5;
+      ev.next = next;
+      // a Blue in this slot is kited to land as the warning appears, so it ends 2s before the spike fires
+      const b = blueDue > t && blueDue <= fireAt ? blueDue : null;
+      const trapOf = pattern => alive.filter(p => BLUES[p.blue].every(tl => pattern.includes(tl) && nb(tl).every(n => pattern.includes(n))));
+      if (b && trapOf(next).length && blueHeld < 1) {
+        // this spike would trap someone in their Blue: hold DPS so the Blue slips to the next spike cycle
+        blueHeld++; blueDue = b + 10; holdDps = true;
+        log(`<span class="blue">Blue due at ${fmt(b)} would trap ${trapOf(next).map(tag).join(", ")} on this spike.</span> The squad holds DPS so it lands one spike later.`);
+        log(`Spike warning at ${fmt(warnAt)}, fires at ${fmt(fireAt)}. Everyone steps off the green tiles.`);
+      } else if (b) {
+        ev.blue = true; blueDue = b + 30; blueHeld = 0;
+        const trapped = trapOf(next);
+        log(`<span class="blue">Blue kited to ${fmt(warnAt)}–${fmt(warnAt + 3)}</span>, then 2s to step off before the spike at ${fmt(fireAt)}.${trapped.length ? "" : " Every player can reach a Blue tile with a safe tile next to it."}`);
+        if (trapped.length) {
+          const prot = alive.find(p => p.role === "Protect");
+          let saved = [];
+          if (prot && t >= bubbleReady) {
+            let best = null, bestN = 0;
+            for (let tl = 0; tl < 16; tl++) { const n = trapped.filter(p => BLUES[p.blue].includes(tl)).length; if (n > bestN) { bestN = n; best = tl; } }
+            ev.bubble = best; bubbleReady = t + 180;
+            saved = trapped.filter(p => BLUES[p.blue].includes(best));
+            log(`<b>${prot.id} (Protect) bubbles tile ${tileName(best)}</b> so ${saved.map(tag).join(", ")} can stand in their Blue through the spike. Next bubble at ${fmt(bubbleReady)}.`);
+          }
+          trapped.filter(p => !saved.includes(p)).forEach(p => { p.alive = false; log(`<span class="bad">${tag(p)} died: every tile of their Blue is spiked with no safe tile next to it.</span>`); });
+          squad.filter(p => !p.alive && p.role && !p.roleLost).forEach(p => { p.roleLost = true; log(`<span class="bad">${p.role} holder ${p.id} is down.</span>`); });
+        }
+      } else log(`Spike warning at ${fmt(warnAt)}, fires at ${fmt(fireAt)}. Everyone steps off the green tiles.`);
+      if (blueDue <= t + 5) blueDue = fireAt + 2; // a Blue skipped by a phase change lands in the next slot
+    }
+    if (phase !== "end" && t + 5 >= 360) { const a = squad.filter(p => p.alive).length; phase = "end"; PH.end[0] = "Reached enrage"; PH.end[1] = `${a} of ${squad.length} alive at the 6:00 enrage.`; log(`Reached the 6:00 enrage with ${a} of ${squad.length} alive.`); }
+  }
+  if (quiet) return;
+  hist = hist.slice(0, idx + 1); hist.push(snap()); idx = hist.length - 1;
+  render();
+}
+
+/* ---------- render ---------- */
+function render() {
+  tokG.innerHTML = ""; overG.innerHTML = "";
+  const bx = boss.c * S + H, by = boss.r * S + H;
+  bossRect.setAttribute("x", bx - H); bossRect.setAttribute("y", by - H);
+  svg.appendChild(bossG); // draw MO above the tokens
+  const onClaim = Number.isInteger(boss.c);
+  bossDot.setAttribute("cx", bx); bossDot.setAttribute("cy", by);
+  bossDot.setAttribute("r", onClaim ? S * .46 : 44);
+  bossDot.setAttribute("fill", onClaim ? "none" : "var(--boss)");
+  bossDot.setAttribute("stroke", onClaim ? "var(--boss)" : "var(--line)");
+  bossDot.setAttribute("stroke-width", onClaim ? 9 : 4);
+  bossRect.setAttribute("opacity", onClaim ? 0 : .3);
+  bossDot.setAttribute("pointer-events", "none"); bossRect.setAttribute("pointer-events", "none");
+  bossTxt.setAttribute("x", bx); bossTxt.setAttribute("y", onClaim ? by - S * .34 : by + 7);
+  bossTxt.setAttribute("style", onClaim ? "fill:#f4f4ef;font-size:16px;font-weight:700;paint-order:stroke;stroke:var(--boss);stroke-width:6px;pointer-events:none" : "fill:#f4f4ef;font-size:20px;pointer-events:none");
+  pillG.style.display = phase === "formation" ? "" : "none"; // pillars are used up once the roles are taken
+  const alive = squad.filter(p => p.alive);
+  const dot = (c, r, fill, rad = 12, op = .8) => el("circle", { cx: c*S + H, cy: r*S + H, r: rad, fill, opacity: op }, overG);
+
+  enemy.forEach((on, tl) => { if (on) el("rect", { x: (tl % 4) * 200 + 4, y: Math.floor(tl / 4) * 200 + 4, width: 192, height: 192, fill: "#d9822b", opacity: .28 }, overG); });
+  units.forEach(u => {
+    const x = Math.min(3.5, Math.max(.5, u.x)) * 200, y = u.row * 200 + 100, sol = u.kind === "Soldier";
+    el("rect", { x: x - (sol ? 26 : 18), y: y - (sol ? 26 : 18), width: sol ? 52 : 36, height: sol ? 52 : 36, transform: `rotate(45 ${x} ${y})`, fill: u.down ? "#7fa59a" : "#1f6f5c", stroke: u.shield ? "#f2c14e" : "#0d3b30", "stroke-width": u.shield ? 6 : 3, opacity: u.down ? .55 : .95 }, overG);
+    el("text", { x, y: y + 5, "text-anchor": "middle", class: "rlabel", style: "fill:#f4f4ef;font-size:13px;pointer-events:none" }, overG).textContent = sol ? "Sol" : "S";
+  });
+  const tileLabel = (tl, text, fill) => el("text", { x: (tl % 4) * 200 + 100, y: Math.floor(tl / 4) * 200 + 24, "text-anchor": "middle", class: "rlabel", style: `fill:${fill};font-size:13px;letter-spacing:.08em;pointer-events:none` }, overG).textContent = text;
+  if (ev && ev.fired && phase === "check") ev.fired.forEach(tl => {
+    el("rect", { x: (tl % 4) * 200 + 6, y: Math.floor(tl / 4) * 200 + 6, width: 188, height: 188, fill: "#1f6b34", opacity: .45 }, overG);
+    tileLabel(tl, "SPIKES FIRED", "#e9f7ec");
+  });
+  const dodgedNow = ev && ev.fired && phase === "check" ? squad.filter(p => p.alive && ev.fired.includes(tileOf(p.c, p.r))) : [];
+  if (ev && ev.next && phase === "hit") {
+    ev.next.forEach(tl => { el("rect", { x: (tl % 4) * 200 + 6, y: Math.floor(tl / 4) * 200 + 6, width: 188, height: 188, fill: "#3aa655", opacity: .38 }, overG); tileLabel(tl, "SPIKE WARNING", "#123d1d"); });
+    if (ev.blue && !(selected && selected.alive)) // Blues are client-side: pick a player to see theirs
+      el("text", { x: 400, y: 412, "text-anchor": "middle", class: "rlabel", style: "fill:#1d4f99;font-size:22px;paint-order:stroke;stroke:#f4f4ef;stroke-width:6px;pointer-events:none" }, overG).textContent = "BLUE INCOMING · click a player to see their Blue";
+    if (ev.blue && selected && selected.alive) BLUES[selected.blue].forEach(tl => {
+      el("rect", { x: (tl % 4) * 200 + 14, y: Math.floor(tl / 4) * 200 + 14, width: 172, height: 172, fill: "#2f6fc0", opacity: .18, stroke: "#2f6fc0", "stroke-width": 10 }, overG);
+      el("text", { x: (tl % 4) * 200 + 100, y: Math.floor(tl / 4) * 200 + 186, "text-anchor": "middle", class: "rlabel", style: "fill:#1d4f99;font-size:13px;pointer-events:none" }, overG).textContent = `${selected.id}'S BLUE`;
+    });
+  }
+  const focus = selected && selected.alive ? selected : null; // a selected player shows only their own lines
+  const shown = p => !focus || p === focus;
+  if (phase === "check" && !focus) alive.forEach(p => legal(p).forEach(([c, r]) => dot(c, r, "var(--jade)", 9, .55)));
+  if (phase === "move" && prev) squad.forEach((p, i) => {
+    if (focus && p !== focus) return;
+    const a = prev[i];
+    if (a.alive && !p.alive) { // died on this prompt: red cross where they stood
+      const x = a.c*S + H, y = a.r*S + H;
+      el("path", { d: `M${x-26} ${y-26}L${x+26} ${y+26}M${x+26} ${y-26}L${x-26} ${y+26}`, stroke: "var(--danger)", "stroke-width": 9, "stroke-linecap": "round" }, overG);
+      return;
+    }
+    if (!a.alive || (a.c === p.c && a.r === p.r)) return;
+    el("line", { x1: a.c*S + H, y1: a.r*S + H, x2: p.c*S + H, y2: p.r*S + H, stroke: "var(--fg)", "stroke-width": 4, "stroke-dasharray": "10 7", opacity: .55 }, overG);
+    dot(a.c, a.r, "var(--fg)", 8, .4);
+  });
+  if (phase === "hit" || phase === "end") alive.filter(shown).forEach(p => {
+    const h = hitTarget(p); if (!h) return;
+    el("line", { x1: p.c*S + H, y1: p.r*S + H, x2: h[0]*S + H, y2: h[1]*S + H, stroke: "var(--jade)", "stroke-width": 5, opacity: .75 }, overG);
+  });
+  if (focus && phase !== "move") legal(focus).forEach(([c, r]) => dot(c, r, "var(--fg)", 14, .8));
+
+  const showHit = phase === "hit" || phase === "end";
+  alive.forEach(p => {
+    const g = el("g", { class: "tok", tabindex: 0, role: "button", "aria-label": `${p.id} on ${sqName(p.c, p.r)}${p.piece ? ", " + p.piece.n : ""}` }, tokG);
+    const stuck = phase === "check" && !legal(p).length;
+    const hit = showHit && hitTarget(p);
+    el("circle", { cx: p.c*S + H, cy: p.r*S + H, r: S * .36, fill: "var(--token)",
+      stroke: stuck ? "var(--danger)" : p === selected ? "var(--fg)" : hit ? "var(--jade)" : p.role ? "var(--role)" : "none",
+      "stroke-width": stuck || hit || p === selected ? 6 : 3 }, g);
+    if (p.piece) el("text", { class: "glyph", x: p.c*S + H, y: p.r*S + S * .16 + H, "text-anchor": "middle", style: `font-size:${S * .46}px` }, g).textContent = p.piece.g;
+    else el("text", { class: "pname", x: p.c*S + H, y: p.r*S + H + 5, "text-anchor": "middle" }, g).textContent = p.id;
+    if (dodgedNow.includes(p)) {
+      el("circle", { cx: p.c*S + H, cy: p.r*S + H, r: S * .44, fill: "none", stroke: "#f4f4ef", "stroke-width": 3, "stroke-dasharray": "6 5" }, g);
+      el("text", { x: p.c*S + H, y: p.r*S + S * .08, "text-anchor": "middle", class: "rlabel", style: "fill:#f4f4ef;font-size:11px;paint-order:stroke;stroke:#1f6b34;stroke-width:4px" }, g).textContent = "STEPPED OFF";
+    }
+    if (p.role) el("text", { x: p.c*S + H, y: p.r*S + S * .96, "text-anchor": "middle", class: "rlabel", style: `font-size:${N > 8 ? 10 : 12}px` }, g).textContent = p.role;
+    const choose = () => { selected = selected === p ? null : p; render(); };
+    g.addEventListener("click", choose);
+    g.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); choose(); } });
+  });
+
+  const ul = $("roster"); ul.innerHTML = "";
+  squad.forEach(p => {
+    const n = legal(p).length, hit = p.alive && hitTarget(p);
+    const li = document.createElement("li"); li.className = (p === selected ? "sel " : "") + (p.alive ? "" : "dead");
+    li.innerHTML = `<span class="n">${p.id}</span><span class="sq">${sqName(p.c, p.r)}</span>
+      <span>${p.piece ? `<span class="g">${p.piece.g}</span> ${p.piece.n}` : "—"}<span class="kd">${p.kind}</span>${p.role ? `<span class="rl">${p.role}</span>` : ""}${hit && p.piece ? `<span class="hit">hits MO</span>` : ""}</span>
+      <span class="${p.alive && p.piece && !n ? "stuck" : "n"}">${!p.alive ? "dead" : p.piece ? (n ? n + " sq" : "stuck") : ""}</span>`;
+    li.addEventListener("click", () => { selected = selected === p ? null : p; render(); });
+    ul.appendChild(li);
+  });
+
+  $("summary").innerHTML = !squad[0].piece ? "No pieces yet." :
+    `MO at <b>${Math.ceil(hp / HP_MAX * 100)}%</b> · ${alive.length} of ${squad.length} alive · <b>${alive.filter(p => hitTarget(p)).length}</b> can hit the boss from where they stand.` +
+    (squad.some(p => p.role) ? ` Roles: ${["Claim", "Protect", "Dispel"].map(r => { const h = squad.find(p => p.role === r); return h && h.alive ? r + " ✓" : `<b class="bad">${r} lost</b>`; }).join(" · ")}` : "");
+  $("phase-title").textContent = `Step ${idx + 1} · ${PH[phase][0]}`;
+  $("phase-text").textContent = PH[phase][1];
+  $("clock").textContent = phase === "formation" || phase === "roles" ? "pre-pull" : fmt(t);
+  $("log").innerHTML = logHTML; $("log").scrollTop = $("log").scrollHeight;
+  $("back").disabled = idx === 0;
+  $("step").disabled = phase === "end" && idx === hist.length - 1;
+}
+
+/* ---------- batch simulation ---------- */
+const PHN = ["100–75%", "75–50%", "50–25%", "25–0%"];
+function runBatch(n) {
+  const st = { runs: 0, kills: 0, enrage: 0, wipes: 0, killTimes: [], alive: 0, roles: 0, stuck: 0, taken: 0, blue: 0, bubbles: 0, maxPat: [0, 0, 0, 0], hitShare: 0, soldiers: 0, soldierKills: 0, knockdowns: 0, enemyTiles: 0 };
+  quiet = true;
+  try {
+    for (let i = 0; i < n; i++) {
+      fresh(); let g = 0, hs = 0, hc = 0, et = 0;
+      while (phase !== "end" && g++ < 400) { advance(); if (phase === "hit") { const a = squad.filter(p => p.alive); hs += a.filter(p => hitTarget(p)).length / Math.max(1, a.length); hc++; et += enemy.filter(Boolean).length; } }
+      st.runs++;
+      if (PH.end[0] === "Boss defeated") { st.kills++; st.killTimes.push(t + 5); } else if (PH.end[0] === "Squad wiped") st.wipes++; else st.enrage++;
+      st.alive += squad.filter(p => p.alive).length;
+      if (squad.filter(p => p.role).every(p => p.alive)) st.roles++;
+      st.stuck += (logHTML.match(/had no legal square/g) || []).length;
+      st.taken += (logHTML.match(/lost its last squares/g) || []).length;
+      st.blue += (logHTML.match(/every tile of their Blue is spiked/g) || []).length;
+      st.bubbles += (logHTML.match(/bubbles tile/g) || []).length;
+      for (const m of logHTML.matchAll(/\((\d+)–(\d+)% pattern (\d+)\)/g)) { const k = PHN.indexOf(m[1] + "–" + m[2] + "%"); if (k >= 0) st.maxPat[k] = Math.max(st.maxPat[k], +m[3]); }
+      st.hitShare += hc ? hs / hc : 0;
+      st.soldiers += (logHTML.match(/became a Jade Soldier/g) || []).length;
+      st.soldierKills += (logHTML.match(/Jade Soldier killed/g) || []).length;
+      st.knockdowns += (logHTML.match(/knocked down/g) || []).length;
+      st.enemyTiles += et / Math.max(1, hc);
+    }
+  } finally { quiet = false; }
+  return st;
+}
+let simAcc = null;
+function addStats(a, b) {
+  if (!a) return b;
+  for (const k of Object.keys(b)) {
+    if (k === "killTimes") a.killTimes = a.killTimes.concat(b.killTimes);
+    else if (k === "maxPat") a.maxPat = a.maxPat.map((x, i) => Math.max(x, b.maxPat[i]));
+    else a[k] += b[k];
+  }
+  return a;
+}
+function showStats(st) {
+  const kt = st.killTimes.slice().sort((x, y) => x - y), med = kt.length ? fmt(kt[kt.length >> 1]) : "–";
+  const pct = x => Math.round(100 * x / st.runs) + "%";
+  const per = x => (x / st.runs).toFixed(2);
+  $("stats").innerHTML = [
+    [pct(st.kills), "fights where MO died"],
+    [med, "median kill time (enrage 6:00)"],
+    [(st.alive / st.runs).toFixed(1) + " / 10", "players alive at the end"],
+    [pct(st.roles), "fights with Claim, Protect and Dispel all alive"],
+    [Math.round(100 * st.hitShare / st.runs) + "%", "of living players in an attack spot after each move"],
+    [per(st.bubbles), "Protect bubbles used per fight"],
+  ].map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
+  const deaths = [["a Blue landing on spiked tiles", st.blue], ["a Pawn with nowhere to move", st.stuck], ["squadmates taking every legal square", st.taken]].filter(d => d[1]).sort((a, b) => b[1] - a[1]);
+  $("findings").innerHTML = [
+    `Deaths per fight: ${deaths.length ? deaths.map(([l, v]) => `${per(v)} from ${l}`).join(", ") : "none"}.`,
+    `Board control: Scouts were knocked down ${per(st.knockdowns)} times per fight, ${per(st.soldiers)} reached the east edge and became Jade Soldiers, and ${per(st.soldierKills)} Soldiers were killed. On average ${(st.enemyTiles / st.runs).toFixed(1)} of 16 tiles were enemy tiles. Claim reclaims one tile every cycle (8s recharge); Scouts move one chess square every 5s (40s end to end) once the first spikes appear.`,
+    `Deepest spike pattern reached per phase: ${st.maxPat.map((m, i) => `${PHN[i]} pattern ${m || 1}`).join(", ")}.`,
+    `Damage assumed: 6 DPS at 25k, 2 supports at 20k, 2 healers at 3k (about 196k when everyone can hit). A player only deals damage while their piece attacks the boss.`,
+    `Not real yet: each player's Blue tiles use a stand-in layout (one centre and one corner tile, rotated per player), and the delay before a new phase's first spike is assumed. Blue deaths will change once the real CM Blue layouts are in.`,
+    `Timing rule: the first move opens at the pull, then every prompt opens the moment a spike fires. After each 25% the system waits for the new phase's first spike (assumed 10s after the threshold). Blues are held by DPS to land just after the move window, and held one more spike (at half DPS) if the coming spike would trap someone in their Blue.`,
+    `Movement: Claim plays the only Pawn and MO follows Claim. Everyone else gets a King, Queen, Rook, Bishop or Knight. Players can stand under MO, and the simulated players never miss a move, so these numbers are the ceiling for a squad that plays perfectly.`,
+  ].map(x => `<li>${x}</li>`).join("");
+  $("simnote").textContent = `${st.runs.toLocaleString()} simulated fights`;
+}
+$("runsim") && $("runsim").addEventListener("click", () => { const keep = snap(), keepH = hist, keepI = idx; simAcc = addStats(simAcc, runBatch(500)); hist = keepH; idx = keepI; restore(keep); showStats(simAcc); });
+
+/* ---------- controls ---------- */
+function forward() { if (idx < hist.length - 1) { idx++; restore(hist[idx]); } else if (phase !== "end") advance(); }
+function back() { if (idx > 0) { idx--; restore(hist[idx]); } }
+function stopAuto() { clearInterval(autoTimer); autoTimer = null; $("auto").textContent = "Auto-play"; }
+function restart() { stopAuto(); fresh(); hist = [snap()]; idx = 0; render(); }
+$("step").addEventListener("click", () => { stopAuto(); forward(); });
+$("back").addEventListener("click", () => { stopAuto(); back(); });
+$("auto").addEventListener("click", () => {
+  if (autoTimer) return stopAuto();
+  $("auto").textContent = "Pause";
+  autoTimer = setInterval(() => { if ($("step").disabled) return stopAuto(); forward(); }, 900);
+});
+$("reset").addEventListener("click", restart);
+
+svg.addEventListener("pointermove", evt => {
+  const pt = svg.createSVGPoint(); pt.x = evt.clientX; pt.y = evt.clientY;
+  const q = pt.matrixTransform(svg.getScreenCTM().inverse());
+  const c = Math.floor(q.x / S), r = Math.floor(q.y / S);
+  if (!inB(c, r)) { hl.setAttribute("visibility", "hidden"); return; }
+  hl.setAttribute("x", c*S); hl.setAttribute("y", r*S); hl.setAttribute("visibility", "visible");
+  const who = squad.find(s => s.alive && s.c === c && s.r === r);
+  $("readout").textContent = `Square ${sqName(c, r)} · MO tile col ${Math.floor(c/2) + 1}, row ${4 - Math.floor(r/2)}${isBoss(c, r) ? " · boss" : ""}${who ? " · " + who.id + (who.piece ? " " + who.piece.n : "") : ""}`;
+});
+
+function showTab(which) {
+  $("tab-sim").hidden = which !== "sim"; $("tab-res").hidden = which !== "res";
+  $("tb-sim").setAttribute("aria-selected", which === "sim"); $("tb-res").setAttribute("aria-selected", which === "res");
+  if (which === "res" && !simAcc) { $("simnote").textContent = "Running 1,000 fights…"; setTimeout(() => { const keep = snap(), keepH = hist, keepI = idx; simAcc = runBatch(1000); hist = keepH; idx = keepI; restore(keep); showStats(simAcc); }, 30); }
+}
+$("tb-sim").addEventListener("click", () => showTab("sim"));
+function setSize(n) {
+  stopAuto(); buildBoard(n);
+  $("sz8").setAttribute("aria-pressed", n === 8); $("sz12").setAttribute("aria-pressed", n === 12);
+  simAcc = null; $("stats").innerHTML = ""; $("findings").innerHTML = "";
+  restart();
+  if (!$("tab-res").hidden) { $("simnote").textContent = "Running 1,000 fights…"; setTimeout(() => { simAcc = runBatch(1000); restart(); showStats(simAcc); }, 30); }
+}
+$("sz8").addEventListener("click", () => setSize(8));
+$("sz12").addEventListener("click", () => setSize(12));
+$("tb-res").addEventListener("click", () => showTab("res"));
+restart();
+</script>
+</body>
+</html>

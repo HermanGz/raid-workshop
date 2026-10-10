@@ -40,7 +40,7 @@ and every player must move like a chess piece. Nothing in the fight is changed.
 - A gold circle on square a2: stand in it 5 s to switch the board on. It disappears once the board is on.
 
 ## Spike patterns
-- `mo-spike-patterns.json`: per phase (p1..), the sequence of 4x4 big-tile patterns (X = spikes), one per 10 s.
+- `spike-patterns.json`: per phase (p1..), the sequence of 4x4 big-tile patterns (X = spikes), one per 10 s.
   Patterns restart at each 25% phase. Rows/cols are as drawn in the community diagrams; the prototype rotated
   them with row = dc, col = 3 - dr to match the board orientation above.
 

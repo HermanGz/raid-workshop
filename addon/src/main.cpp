@@ -214,8 +214,10 @@ static uint32_t LastMap = 0;
 static void SaveSettings();
 static std::atomic<int> RelayState{ 0 }; // 0 off, 1 connecting, 2 connected, 3 error
 static int PeersOnline();
-static char RelayUrl[160] = "";          // e.g. wss://raid-relay.yourname.workers.dev
-static char RelayRoom[40] = "";          // squad code everyone types the same (e.g. KP)
+static const char* DEFAULT_RELAY = "wss://raid-relay.hermangonzalezr.workers.dev";
+static char RelayUrl[160] = "";          // empty = DEFAULT_RELAY (override only in debug)
+static char RelayRoom[40] = "";          // optional extra code (debug); normally empty
+static bool SquadLinkOn = true;          // share my position automatically while the board is on
 struct WVert { float x, y, z, w; float r, g, b, a; };   // x,y in NDC; z = distance in front of the camera
 static std::vector<WVert> WBuild, WReady;
 static bool  InFrame = false;           // the setting
@@ -380,7 +382,7 @@ static void SaveSettings()
 	std::ofstream f(SettingsPath());
 	if (!f) { return; }
 	f << "debug " << DebugMode << "\nalpha " << ChessAlpha << "\ngg " << RealGG << "\nonscreen " << PieceOnScreen << "\nclaim " << IAmClaim << "\nunder " << UnderChars << "\ninframe " << InFrame << "\ninject " << InjectAt << "\n";
-	f << "relayurl " << RelayUrl << "\nrelayroom " << RelayRoom << "\n";
+	f << "relayurl " << RelayUrl << "\nrelayroom " << RelayRoom << "\nsquadlink " << SquadLinkOn << "\n";
 }
 static void LoadSettings()
 {
@@ -404,6 +406,7 @@ static void LoadSettings()
 		else if (k == "under") UnderChars = v != 0;
 		else if (k == "inframe") InFrame = v != 0;
 		else if (k == "inject") InjectAt = (int)v;
+		else if (k == "squadlink") SquadLinkOn = v != 0;
 	}
 }
 
@@ -1995,7 +1998,8 @@ static void DrawPanel()
 	ImGui::Separator();
 	bool ch = false;
 	ch |= ImGui::Checkbox("I hold Claim (Pawn)", &IAmClaim);
-	if (RelayState == 2) ImGui::Text("Squad link: %d other player(s) online.", PeersOnline());
+	if (RelayState == 2) ImGui::Text("Squad: %d other player(s) with the addon.", PeersOnline() );
+	else if (BoardActive && SquadLinkOn) ImGui::TextDisabled(RelayState == 1 ? "Squad link: connecting..." : "Squad link: offline (retrying)");
 	ch |= ImGui::Checkbox("Type /gg when I fail", &RealGG);
 	ch |= ImGui::Checkbox("Show my piece at the bottom of the screen", &PieceOnScreen);
 	ch |= ImGui::SliderFloat("Board strength", &ChessAlpha, 0.1f, 0.8f, "%.2f");
@@ -2017,74 +2021,114 @@ static void DrawPanel()
 /* ---------------------------------------------------------------------------------------------- */
 
 static bool RelayOn = false;
-static std::string RelayErr;
-static std::thread RelayRx, RelayTx;
-static std::atomic<bool> RelayRun{ false };
-static HINTERNET hSes = nullptr, hCon = nullptr, hWs = nullptr;
 static std::mutex RelayMx;               // guards the outgoing data below
 static std::string MyName; static V3 MyPos{ 0, 0, 0 }; static bool MyPosValid = false;
 static std::deque<std::string> RelayOut;
+static std::string RelayErr;
+
+// One connection = one object owned by its own thread. Stopping never waits: it flags the
+// connection and closes its handles, and the thread cleans up on its own.
+struct RelayConn
+{
+	std::atomic<bool> run{ true };
+	std::mutex hmx; HINTERNET ses = nullptr, con = nullptr, ws = nullptr;
+	std::string url, room;
+	void CloseAll()
+	{
+		std::lock_guard<std::mutex> lk(hmx);
+		if (ws) { WinHttpWebSocketShutdown(ws, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, nullptr, 0); WinHttpCloseHandle(ws); ws = nullptr; }
+		if (con) { WinHttpCloseHandle(con); con = nullptr; }
+		if (ses) { WinHttpCloseHandle(ses); ses = nullptr; }
+	}
+};
+static std::shared_ptr<RelayConn> Conn;  // current connection
+static std::mutex ConnMx;
+static std::atomic<int> RelayThreads{ 0 }; // live connection threads (the addon waits for 0 on unload)
+static bool IsCurrent(const std::shared_ptr<RelayConn>& c) { std::lock_guard<std::mutex> lk(ConnMx); return Conn == c; }
 
 static std::wstring Widen(const std::string& a) { return std::wstring(a.begin(), a.end()); }
-static void RelayClose()
-{
-	if (hWs) { WinHttpWebSocketClose(hWs, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, nullptr, 0); WinHttpCloseHandle(hWs); hWs = nullptr; }
-	if (hCon) { WinHttpCloseHandle(hCon); hCon = nullptr; }
-	if (hSes) { WinHttpCloseHandle(hSes); hSes = nullptr; }
-}
 static std::string RoomKey()
 {
-	// room = squad code + map + server instance, so two squads with the same code never mix
-	char buf[200]; const uint8_t* ip = ML ? ML->Context.ServerAddress : nullptr;
-	unsigned h = 2166136261u; if (ip) for (int i = 0; i < 28; i++) { h ^= ip[i]; h *= 16777619u; }
-	std::string room;
+	// Everyone in the same map instance lands in the same room automatically. Raid instances belong
+	// to one squad, so in MO the room is exactly your squad. An optional code (debug) splits further.
+	char buf[200]; unsigned h = 2166136261u;
+	auto mix = [&](const void* p, size_t n) { const uint8_t* b = (const uint8_t*)p; for (size_t i = 0; i < n; i++) { h ^= b[i]; h *= 16777619u; } };
+	if (ML) { mix(ML->Context.ServerAddress, 28); mix(&ML->Context.ShardID, 4); mix(&ML->Context.InstanceID, 4); }
+	std::string room = "I";
 	for (const char* p = RelayRoom; *p; p++) if (isalnum((unsigned char)*p)) room += (char)toupper((unsigned char)*p);
 	snprintf(buf, sizeof(buf), "%s-%u-%08x", room.c_str(), MI ? MI->MapID : 0, h);
 	return buf;
 }
-static bool RelayConnect()
+static void SetErr(const std::string& e) { std::lock_guard<std::mutex> lk(RelayMx); RelayErr = e; }
+static bool ConnOpen(RelayConn& c)
 {
-	std::string url = RelayUrl, room = RoomKey();
-	bool secure = url.rfind("wss://", 0) == 0;
-	if (!secure && url.rfind("ws://", 0) != 0) { RelayErr = "The address must start with wss:// or ws://"; return false; }
-	std::string rest = url.substr(secure ? 6 : 5);
+	bool secure = c.url.rfind("wss://", 0) == 0;
+	if (!secure && c.url.rfind("ws://", 0) != 0) { SetErr("The address must start with wss:// or ws://"); return false; }
+	std::string rest = c.url.substr(secure ? 6 : 5);
 	std::string host = rest.substr(0, rest.find('/'));
 	INTERNET_PORT port = secure ? 443 : 80;
 	size_t colon = host.find(':'); if (colon != std::string::npos) { port = (INTERNET_PORT)atoi(host.c_str() + colon + 1); host = host.substr(0, colon); }
-	std::wstring path = Widen("/room/" + room);
-	hSes = WinHttpOpen(L"RaidWorkshop/0.9", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-	if (!hSes) hSes = WinHttpOpen(L"RaidWorkshop/0.9", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-	if (!hSes) { RelayErr = "Could not start networking."; return false; }
-	hCon = WinHttpConnect(hSes, Widen(host).c_str(), port, 0);
-	if (!hCon) { RelayErr = "Could not reach " + host; return false; }
-	HINTERNET req = WinHttpOpenRequest(hCon, L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, secure ? WINHTTP_FLAG_SECURE : 0);
-	if (!req) { RelayErr = "Request failed."; return false; }
+	std::wstring path = Widen("/room/" + c.room);
+	HINTERNET ses = WinHttpOpen(L"RaidWorkshop/0.9", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+	if (!ses) ses = WinHttpOpen(L"RaidWorkshop/0.9", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+	if (!ses) { SetErr("Could not start networking."); return false; }
+	WinHttpSetTimeouts(ses, 5000, 5000, 5000, 0);   // receive has no timeout: it waits for messages
+	{ std::lock_guard<std::mutex> lk(c.hmx); c.ses = ses; }
+	HINTERNET con = WinHttpConnect(ses, Widen(host).c_str(), port, 0);
+	if (!con) { SetErr("Could not reach " + host); return false; }
+	{ std::lock_guard<std::mutex> lk(c.hmx); c.con = con; }
+	HINTERNET req = WinHttpOpenRequest(con, L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, secure ? WINHTTP_FLAG_SECURE : 0);
+	if (!req) { SetErr("Request failed."); return false; }
 	WinHttpSetOption(req, WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, nullptr, 0);
 	if (!WinHttpSendRequest(req, WINHTTP_NO_ADDITIONAL_HEADERS, 0, nullptr, 0, 0, 0) || !WinHttpReceiveResponse(req, nullptr))
-	{ RelayErr = "Server did not answer."; WinHttpCloseHandle(req); return false; }
-	hWs = WinHttpWebSocketCompleteUpgrade(req, 0);
+	{ SetErr("Server did not answer."); WinHttpCloseHandle(req); return false; }
+	HINTERNET ws = WinHttpWebSocketCompleteUpgrade(req, 0);
 	WinHttpCloseHandle(req);
-	if (!hWs) { RelayErr = "Server refused the connection (is the address right?)."; return false; }
-	RelayErr.clear();
+	if (!ws) { SetErr("Server refused the connection."); return false; }
+	std::lock_guard<std::mutex> lk(c.hmx);
+	if (!c.run) { WinHttpCloseHandle(ws); return false; }
+	c.ws = ws;
 	return true;
 }
 static void HandleLine(const std::string& line)
 {
 	std::vector<std::string> p; size_t a = 0;
 	while (true) { size_t b = line.find('|', a); p.push_back(line.substr(a, b == std::string::npos ? std::string::npos : b - a)); if (b == std::string::npos) break; a = b + 1; }
-	if (p.size() < 2 || p[1].empty() || p[1] == MyName) return;
+	std::string me; { std::lock_guard<std::mutex> lk(RelayMx); me = MyName; }
+	if (p.size() < 2 || p[1].empty() || p[1] == me) return;
 	std::lock_guard<std::mutex> lk(PeersMx);
 	Peer& pe = Peers[p[1]]; pe.name = p[1];
 	if (p[0] == "P" && p.size() >= 5) { pe.pos = { (float)atof(p[2].c_str()), (float)atof(p[3].c_str()), (float)atof(p[4].c_str()) }; pe.seen = NowSec(); }
 	else if (p[0] == "R" && p.size() >= 5) { pe.resF = atoi(p[2].c_str()); pe.resR = atoi(p[3].c_str()); pe.resPass = p[4] == "1"; pe.resT = NowSec(); pe.seen = NowSec(); }
 }
-static void RelayRxLoop()
+static void ConnThread(std::shared_ptr<RelayConn> c)
 {
+	struct Count { Count() { RelayThreads++; } ~Count() { RelayThreads--; } } count;
+	if (!ConnOpen(*c)) { if (c->run && IsCurrent(c)) RelayState = 3; c->CloseAll(); return; }
+	if (!IsCurrent(c)) { c->CloseAll(); return; }
+	RelayState = 2; SetErr("");
+	std::thread tx([c] {
+		while (c->run)
+		{
+			std::string out;
+			{
+				std::lock_guard<std::mutex> lk(RelayMx);
+				if (MyPosValid && !MyName.empty()) { char b[160]; snprintf(b, sizeof(b), "P|%s|%.2f|%.2f|%.2f", MyName.c_str(), MyPos.x, MyPos.y, MyPos.z); out = b; }
+				while (!RelayOut.empty()) { if (!out.empty()) out += "\n"; out += RelayOut.front(); RelayOut.pop_front(); }
+			}
+			HINTERNET ws; { std::lock_guard<std::mutex> lk(c->hmx); ws = c->ws; }
+			if (!ws) break;
+			if (!out.empty() && WinHttpWebSocketSend(ws, WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE, (void*)out.data(), (DWORD)out.size()) != NO_ERROR) break;
+			Sleep(100);
+		}
+	});
 	char buf[1024]; std::string msg;
-	while (RelayRun)
+	while (c->run)
 	{
+		HINTERNET ws; { std::lock_guard<std::mutex> lk(c->hmx); ws = c->ws; }
+		if (!ws) break;
 		DWORD got = 0; WINHTTP_WEB_SOCKET_BUFFER_TYPE type;
-		if (WinHttpWebSocketReceive(hWs, buf, sizeof(buf), &got, &type) != NO_ERROR) break;
+		if (WinHttpWebSocketReceive(ws, buf, sizeof(buf), &got, &type) != NO_ERROR) break;
 		if (type == WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE) break;
 		msg.append(buf, got);
 		if (type == WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE || type == WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE)
@@ -2095,36 +2139,16 @@ static void RelayRxLoop()
 			msg.clear();
 		}
 	}
-	if (RelayRun) { RelayState = 3; if (RelayErr.empty()) RelayErr = "Disconnected."; }
-}
-static void RelayTxLoop()
-{
-	while (RelayRun)
-	{
-		std::string out;
-		{
-			std::lock_guard<std::mutex> lk(RelayMx);
-			if (MyPosValid && !MyName.empty())
-			{
-				char b[160]; snprintf(b, sizeof(b), "P|%s|%.2f|%.2f|%.2f", MyName.c_str(), MyPos.x, MyPos.y, MyPos.z); out = b;
-			}
-			while (!RelayOut.empty()) { if (!out.empty()) out += "\n"; out += RelayOut.front(); RelayOut.pop_front(); }
-		}
-		if (!out.empty() && hWs)
-		{
-			if (WinHttpWebSocketSend(hWs, WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE, (void*)out.data(), (DWORD)out.size()) != NO_ERROR)
-			{ RelayState = 3; RelayErr = "Could not send."; break; }
-		}
-		Sleep(100);
-	}
+	bool wasRunning = c->run.exchange(false);
+	c->CloseAll();
+	tx.join();
+	if (wasRunning && IsCurrent(c)) { RelayState = 3; SetErr("Disconnected."); }
 }
 static void RelayStop()
 {
-	RelayRun = false;
-	if (hWs) WinHttpWebSocketShutdown(hWs, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, nullptr, 0);
-	if (RelayTx.joinable()) RelayTx.join();
-	RelayClose();                         // unblocks the receive
-	if (RelayRx.joinable()) RelayRx.join();
+	std::shared_ptr<RelayConn> c;
+	{ std::lock_guard<std::mutex> lk(ConnMx); c.swap(Conn); }
+	if (c) { c->run = false; c->CloseAll(); }   // the thread notices and exits by itself
 	RelayState = 0;
 	std::lock_guard<std::mutex> lk(PeersMx);
 	for (auto it = Peers.begin(); it != Peers.end();) { if (!it->second.dummy) it = Peers.erase(it); else ++it; }
@@ -2132,14 +2156,11 @@ static void RelayStop()
 static void RelayStart()
 {
 	RelayStop();
-	if (!RelayUrl[0] || !RelayRoom[0]) { RelayErr = "Type the relay address and a squad code."; RelayState = 3; return; }
-	RelayState = 1; RelayRun = true;
-	std::thread([] {
-		if (!RelayConnect()) { RelayClose(); RelayState = 3; RelayRun = false; return; }
-		RelayState = 2;
-		RelayRx = std::thread(RelayRxLoop);
-		RelayTx = std::thread(RelayTxLoop);
-	}).detach();
+	auto c = std::make_shared<RelayConn>();
+	c->url = RelayUrl[0] ? RelayUrl : DEFAULT_RELAY; c->room = RoomKey();
+	{ std::lock_guard<std::mutex> lk(ConnMx); Conn = c; }
+	RelayState = 1;
+	std::thread(ConnThread, c).detach();
 }
 static void RelaySendResult(int f, int r, bool pass)
 {
@@ -2148,8 +2169,26 @@ static void RelaySendResult(int f, int r, bool pass)
 	char b[120]; snprintf(b, sizeof(b), "R|%s|%d|%d|%d", MyName.c_str(), f, r, pass ? 1 : 0);
 	RelayOut.push_back(b);
 }
+static std::string RelayRoomNow; static double RelayRetryAt = 0;
+static void RelayAuto()
+{
+	// connect by itself while the board is on (MO room or test board); leave when it is off,
+	// move to the new room when the instance changes, retry after errors.
+	bool want = SquadLinkOn && BoardActive;
+	double t = NowSec();
+	if (!want) { if (RelayState != 0) RelayStop(); RelayRoomNow.clear(); return; }
+	std::string room = RoomKey();
+	if (RelayState == 2 && room != RelayRoomNow) { RelayStop(); }
+	if ((RelayState == 0 || RelayState == 3) && t >= RelayRetryAt)
+	{
+		RelayRetryAt = t + 10.0;
+		RelayRoomNow = room;
+		RelayStart();
+	}
+}
 static void RelayFrame() // once per frame: hand our position to the sender, drop silent peers
 {
+	RelayAuto();
 	{
 		std::lock_guard<std::mutex> lk(RelayMx);
 		if (MI) { char n[21]; memcpy(n, MI->Name, 20); n[20] = 0; MyName = n; for (char& c : MyName) if (c == '|' || c == '\n') c = ' '; }
@@ -2200,15 +2239,19 @@ static void DrawPeers(ImDrawList* fg)
 static void RelayUI()
 {
 	ImGui::Separator();
-	ImGui::TextDisabled("Squad link (other players' positions)");
-	ImGui::SetNextItemWidth(260); ImGui::InputText("Relay address", RelayUrl, sizeof(RelayUrl));
-	ImGui::SetNextItemWidth(120); ImGui::InputText("Squad code", RelayRoom, sizeof(RelayRoom));
-	ImGui::SameLine();
-	if (RelayState == 2 || RelayState == 1) { if (ImGui::Button("Disconnect")) { RelayStop(); SaveSettings(); } }
-	else if (ImGui::Button("Connect")) { RelayStart(); SaveSettings(); }
+	ImGui::TextDisabled("Squad link (automatic: everyone in this instance with the addon)");
+	if (ImGui::Checkbox("Share my position with my squad", &SquadLinkOn)) SaveSettings();
+	if (ImGui::TreeNode("Advanced"))
+	{
+		ImGui::SetNextItemWidth(260); ImGui::InputText("Relay address (empty = default)", RelayUrl, sizeof(RelayUrl));
+		ImGui::SetNextItemWidth(120); ImGui::InputText("Extra code (optional)", RelayRoom, sizeof(RelayRoom));
+		if (ImGui::Button("Reconnect")) { RelayStop(); RelayRetryAt = 0; SaveSettings(); }
+		ImGui::TreePop();
+	}
 	const char* st[] = { "Not connected.", "Connecting...", "Connected.", "Error: " };
 	int sidx = RelayState; if (sidx < 0 || sidx > 3) sidx = 0;
-	if (sidx == 3) ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "%s%s", st[3], RelayErr.c_str());
+	std::string err; { std::lock_guard<std::mutex> lk(RelayMx); err = RelayErr; }
+	if (sidx == 3) ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "%s%s", st[3], err.c_str());
 	else ImGui::Text("%s  %d other player(s) online.", st[sidx], PeersOnline());
 	if (ImGui::Button("Add test player on my square")) AddDummy(FromMumble(ML->AvatarPosition));
 	ImGui::SameLine(); if (ImGui::Button("Remove test players")) ClearDummies();
@@ -2420,6 +2463,7 @@ static void AddonUnload()
 	API->WndProc_Deregister(WndProcHook);
 	ProbeStop();
 	RelayStop();
+	for (int i = 0; i < 300 && RelayThreads > 0; i++) Sleep(10); // let connection threads finish before the DLL goes away
 	Outbox.clear();
 	ML = nullptr; MI = nullptr; NL = nullptr;
 }
